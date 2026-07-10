@@ -1,0 +1,49 @@
+---
+title: Connection reuse
+---
+
+The container persists between requests, so module-level state is initialized once and
+reused. Module state is per-container and **lost on scale-down or redeploy** — treat it
+as a cache, not a store. For durable data use
+[KV](https://developers.telnyx.com/docs/edge-compute/kv); for cross-request consistency use
+[Stateful Actors](https://developers.telnyx.com/docs/edge-compute/stateful-actors).
+
+## Run
+
+```bash
+telnyx-edge new-func -l ts -n connection-reuse
+# copy index.ts over the scaffold's, then:
+telnyx-edge ship
+```
+
+Pure `node:http`. `npm run typecheck` passes as-is.
+
+## Try it
+
+The example caches responses from `https://httpbin.org/uuid` (a free public endpoint
+that returns a fresh UUID per call). Same URL twice → cache hit, same UUID returned.
+Different URLs → new cache entries, different UUIDs.
+
+Copy the function URL from `telnyx-edge ship` output and export it so the
+calls below work:
+
+```bash
+export URL=<paste function URL here>
+```
+
+```bash
+# same URL twice → cache hit (same uuid returned, cachedKeys unchanged)
+curl -sS $URL/foo
+# → { "cachedKeys": N,   "body": "{\"uuid\":\"<uuid-A>\"}" }
+curl -sS $URL/foo
+# → { "cachedKeys": N,   "body": "{\"uuid\":\"<uuid-A>\"}" }  ← same uuid, same count
+
+# different URL → new cache entry (cachedKeys +1, different uuid)
+curl -sS $URL/bar
+# → { "cachedKeys": N+1, "body": "{\"uuid\":\"<uuid-B>\"}" }
+```
+
+`cachedKeys` may not start at 0 on a fresh container — the platform can probe
+non-`/health` paths during warm-up, and each distinct URL adds one Map entry. Watch
+the *delta*, not the absolute number: same URL twice keeps it flat, a new URL bumps
+it by one.
