@@ -1,0 +1,6 @@
+[edge_compute]
+func_id = "REPLACE_ME"      # written by `telnyx-edge new-func -l ts -n call-telnyx-api`
+func_name = "call-telnyx-api"
+
+[telnyx]
+binding = "MY_TELNYX"       # env.MY_TELNYX is a pre-authenticated Telnyx client

@@ -1,0 +1,72 @@
+---
+title: Call the Telnyx API
+---
+
+Declare a `[telnyx]` binding and `env.MY_TELNYX` is a pre-authenticated Telnyx client — no
+API key in your code. Outside TypeScript, declaring the binding still injects
+`TELNYX_API_KEY`; call `https://api.telnyx.com/v2` over plain REST with it.
+
+## Prerequisites
+
+Before running this example you need:
+
+- **A Telnyx-owned phone number with SMS enabled** (used as `from`). Purchase one in the [Telnyx Portal](https://portal.telnyx.com/#/app/numbers/my-numbers).
+- **A Messaging Profile** with that number attached. SMS-capable numbers must belong to a profile — it controls webhooks, delivery settings, and permission to send. Create one at [Portal → Messaging → Messaging Profiles](https://portal.telnyx.com/#/app/messaging).
+- **A destination number** for `to` (your cell, or a second number you own for testing).
+- **For US A2P messaging: an active 10DLC campaign registered on the sending number.** Without this, sends will fail downstream at the carrier with error code 40010 even though the API accepts the request. Register at [Portal → Messaging → 10DLC](https://portal.telnyx.com/#/app/messaging/10dlc). Non-US destinations don't require this.
+
+Replace the placeholder `from` and `to` values in `index.ts` before shipping.
+
+## Run
+
+```bash
+telnyx-edge new-func -l ts -n call-telnyx-api
+```
+
+Then copy this example's `index.ts` into the generated directory, and **add the following block to the generated `func.toml`** (it is not created automatically):
+
+```toml
+[telnyx]
+binding = "MY_TELNYX"
+```
+
+This binding makes a pre-authenticated Telnyx SDK client available at `env.MY_TELNYX` in your code — no API key handling required.
+
+```bash
+npm install                # installs @telnyx/edge-runtime + @types/node
+telnyx-edge types          # generates telnyx-env.d.ts so env.MY_TELNYX is typed
+telnyx-edge ship
+```
+
+## Verify the send actually delivered
+
+A 200 response from your function means `messages.send` returned without throwing — the API accepted the send. It does **not** mean the SMS reached the destination phone. Delivery is a separate lifecycle handled asynchronously by the carrier.
+
+The response JSON includes the message `id`. Use it to check status:
+
+```bash
+# 1. Trigger the function
+curl -s https://<your-func-url>/ | tee /tmp/send.json
+# {"sent":true,"id":"<message-uuid>"}
+
+MSG_ID=$(jq -r .id /tmp/send.json)
+
+# 2. Poll the message record
+curl -s -H "Authorization: Bearer $TELNYX_API_KEY" \
+  https://api.telnyx.com/v2/messages/$MSG_ID | jq '.data.to[0].status'
+```
+
+**Delivery statuses you may see:**
+
+| Status | Meaning |
+|---|---|
+| `queued` | Telnyx accepted the send; not yet handed to carrier |
+| `sending` | Handed to the destination carrier |
+| `sent` | Carrier accepted; en route to handset |
+| `delivered` | Carrier confirmed handset receipt |
+| `delivery_failed` | Carrier rejected or handset unreachable |
+| `sending_failed` | Telnyx could not hand off to the carrier |
+
+**If `sent: true` but no SMS arrives on a US destination**, check `tcr_campaign_id` on the message record. If it's `null`, the sending number has no 10DLC campaign attached and US carriers will silently drop A2P traffic (see Prerequisites). Register a campaign at [Portal → Messaging → 10DLC](https://portal.telnyx.com/#/app/messaging/10dlc), or test with an inbound flow (send an SMS *to* the Telnyx number instead) which does not require 10DLC.
+
+Needs `@telnyx/edge-runtime`. `env.MY_TELNYX` type-checks after `telnyx-edge types`.
