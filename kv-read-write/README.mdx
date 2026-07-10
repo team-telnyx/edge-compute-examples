@@ -1,0 +1,63 @@
+---
+title: KV read/write
+---
+
+Declare a `[storage.kv.<NAME>]` binding and `env.MY_KV` is a key-value namespace. Keys ≤ 256
+chars from `a-z A-Z 0-9 - _ / = .` (colons rejected — use `/`), values ≤ 1 MiB, last-write-wins.
+For counters or per-entity coordination use
+[Stateful Actors](https://developers.telnyx.com/docs/edge-compute/stateful-actors) instead.
+
+## Run
+
+```bash
+telnyx-edge storage kv create --name my-cache      # note the KV ID → paste into func.toml id
+telnyx-edge new-func -l ts -n kv-read-write         # copy index.ts + [storage.kv.MY_KV] over
+telnyx-edge types
+telnyx-edge ship
+```
+
+Needs `@telnyx/edge-runtime` **≥ 0.2.2** (earlier silently ignore `expirationTtl`). `rest.sh`
+shows the non-TypeScript REST path. `env.MY_KV` type-checks after `telnyx-edge types`.
+
+## Verify from the CLI
+
+Anything you write from a function is readable from your laptop with `telnyx-edge storage kv`.
+Useful for debugging or seeding data:
+
+```bash
+KV_ID=<your-kv-id>
+
+# List all keys
+telnyx-edge storage kv key list $KV_ID
+
+# Read one key (mirrors env.MY_KV.get in the runtime)
+telnyx-edge storage kv key get $KV_ID "user/123"
+
+# Write one key from your laptop
+telnyx-edge storage kv key put $KV_ID "user/123" '{"name":"Alice"}'
+
+# Delete
+telnyx-edge storage kv key delete $KV_ID "user/123"
+```
+
+## `expirationTtl` is server-enforced
+
+`env.MY_KV.put(key, value, { expirationTtl: 60 })` is a server-side TTL — KV auto-deletes the
+key after 60 seconds. Your code never has to check whether it's expired: subsequent `get`s
+return `null` once TTL elapses. Use for OTPs, session tokens, short-lived caches.
+
+## Handling missing keys
+
+`env.MY_KV.get(key)` returns `null` when the key doesn't exist (or has expired). Always
+null-check:
+
+```ts
+const cached = await env.MY_KV.get('user/123', { type: 'json' });
+if (cached === null) {
+  // key never existed or TTL expired — fetch/compute the real value
+  return new Response('not found', { status: 404 });
+}
+return new Response(JSON.stringify(cached), {
+  headers: { 'content-type': 'application/json' },
+});
+```
