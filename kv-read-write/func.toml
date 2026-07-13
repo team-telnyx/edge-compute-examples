@@ -1,0 +1,6 @@
+[edge_compute]
+func_id = "REPLACE_ME"     # written by `telnyx-edge new-func -l ts -n kv-read-write`
+func_name = "kv-read-write"
+
+[storage.kv.MY_KV]
+id = "REPLACE_ME"   # from `telnyx-edge storage kv create --name my-cache`
