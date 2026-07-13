@@ -1,0 +1,72 @@
+---
+title: Build a REST API
+---
+
+A create/read/delete notes API — `POST /notes`, `GET /notes`, `GET /notes/:id`,
+`DELETE /notes/:id` — as a single TypeScript function. Records live in a KV namespace
+bound as `env.NOTES`, so state survives deploys and restarts and is shared by every
+container instance.
+
+> **No `PUT` / `PATCH`.** This example intentionally skips in-place edits because KV writes
+> are last-write-wins. See [What this example does not do](#what-this-example-does-not-do)
+> for why, and what to reach for when you need atomic updates.
+
+## Prerequisites
+
+- `telnyx-edge` CLI **v0.2.3+**, authenticated. Node 18+ for local type-checking.
+- `@telnyx/edge-runtime` **`^0.3.0`** (already pinned in `package.json`).
+
+## Run
+
+```bash
+telnyx-edge new-func -l ts -n notes-api            # writes func.toml with your real func_id
+# copy index.ts over the scaffold's, then merge [storage.kv.NOTES] from this func.toml:
+telnyx-edge storage kv create --name notes         # paste the KV ID into func.toml [storage.kv.NOTES].id
+telnyx-edge types                                  # types env.NOTES as KvNamespace
+telnyx-edge ship
+```
+
+Then exercise the live URL:
+
+```bash
+B=https://notes-api-<org>.telnyxcompute.com
+
+curl -sS -X POST $B/notes \
+  -H 'content-type: application/json' \
+  -d '{"title":"groceries","body":"eggs, coffee"}'
+# → {"id":"2e6e8c82-1b9f-4044-8005-ccdf28aceaf9","title":"groceries","body":"eggs, coffee","updatedAt":"2026-07-07T06:47:12.123Z"}
+
+curl -sS $B/notes
+# → {"notes":[{"id":"…","title":"groceries","body":"eggs, coffee","updatedAt":"…"}]}
+
+curl -sS $B/notes/2e6e8c82-1b9f-4044-8005-ccdf28aceaf9
+# → {"id":"…","title":"groceries","body":"eggs, coffee","updatedAt":"…"}
+
+curl -sS -X DELETE $B/notes/2e6e8c82-1b9f-4044-8005-ccdf28aceaf9
+# → {"deleted":true}
+```
+
+## Verify from the CLI
+
+While debugging, inspect the KV namespace directly:
+
+```bash
+telnyx-edge storage kv key list <kv-id>              # list all keys (note/<uuid>)
+telnyx-edge storage kv key get <kv-id> "note/<uuid>" # read the raw JSON value
+```
+
+## What this example does not do
+
+- **No `PUT` / `PATCH`.** By design — `POST /notes` creates, `DELETE` removes, and updates
+  are omitted because KV writes are **last-write-wins**. If two clients read → merge → write
+  concurrently, one write silently overwrites the other. For atomic updates on a per-record
+  basis, use a
+  [Stateful Actor](https://developers.telnyx.com/docs/edge-compute/stateful-actors) per
+  note (one actor instance = one call at a time = no race). Adding `PUT` here would work,
+  but the constraint is worth knowing before you build on it.
+- **First page only.** `GET /notes` returns up to 1000 notes and no cursor — good enough
+  for a demo. For >1000 keys, extend the handler to accept `?cursor=…` and pass it into
+  `env.NOTES.list({ cursor })`; the runtime returns `list_complete: false` and a
+  `cursor` string when there's more.
+
+KV keys forbid `:` (use `/`), values are ≤ 1 MiB.

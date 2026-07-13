@@ -11,6 +11,7 @@ Each folder is a self-contained function you can ship to the platform with the [
 | [`call-telnyx-api`](./call-telnyx-api) | Use `env.MY_TELNYX` to send SMS — no API key handling |
 | [`kv-read-write`](./kv-read-write) | Read, write, and TTL keys with `env.MY_KV` (Telnyx KV storage) |
 | [`connection-reuse`](./connection-reuse) | Module-level state and warm-container reuse across requests |
+| [`notes-rest-api`](./notes-rest-api) | Create / read / delete REST API backed by KV |
 
 ## Getting started
 
