@@ -16,15 +16,63 @@ container instance.
 - `telnyx-edge` CLI **v0.2.3+**, authenticated. Node 18+ for local type-checking.
 - `@telnyx/edge-runtime` **`^0.3.0`** (already pinned in `package.json`).
 
-## Run
+## Deploy
 
-```bash
-telnyx-edge new-func -l ts -n notes-api            # writes func.toml with your real func_id
-# copy index.ts over the scaffold's, then merge [storage.kv.NOTES] from this func.toml:
-telnyx-edge storage kv create --name notes         # paste the KV ID into func.toml [storage.kv.NOTES].id
-telnyx-edge types                                  # types env.NOTES as KvNamespace
-telnyx-edge ship
-```
+1. **Scaffold** a new function in a scratch directory (not this cookbook directory).
+   `new-func` writes your real `func_id` into the generated `func.toml`:
+
+   ```bash
+   cd /tmp   # or anywhere outside this repo
+   telnyx-edge new-func -l ts -n notes-api
+   ```
+
+2. **Overwrite the scaffold's source files** with the cookbook versions. Replace
+   `<COOKBOOK>` with the path to your local clone of `edge-compute-cookbook`:
+
+   ```bash
+   cp <COOKBOOK>/notes-rest-api/index.ts \
+      <COOKBOOK>/notes-rest-api/package.json \
+      <COOKBOOK>/notes-rest-api/tsconfig.json \
+      /tmp/notes-api/
+   cd /tmp/notes-api
+   ```
+
+   > This replaces the scaffold's placeholder `index.ts`, `package.json`, and
+   > `tsconfig.json` — expected. **Do not copy `func.toml`** — the scaffold's has your
+   > real `func_id`; the cookbook's has `func_id = "REPLACE_ME"` and would break the
+   > deploy.
+
+3. **Provision the KV namespace** and paste its ID into the scaffolded `func.toml`:
+
+   ```bash
+   telnyx-edge storage kv create --name notes
+   # → copy the returned namespace ID
+   ```
+
+   Then append this block to the scaffold's `func.toml` (replace `<KV_ID>` with the
+   returned ID):
+
+   ```toml
+   [storage.kv.NOTES]
+   id = "<KV_ID>"
+   ```
+
+4. **Install dependencies and generate typed bindings:**
+
+   ```bash
+   npm install         # installs @telnyx/edge-runtime
+   telnyx-edge types   # writes telnyx-env.d.ts so env.NOTES is typed
+   ```
+
+5. **Ship the function:**
+
+   ```bash
+   telnyx-edge ship --timeout 30m   # → https://notes-api-<hash>.telnyxcompute.com
+   ```
+
+   > TypeScript builds typically take 10–15 minutes. `--timeout 30m` (v0.2.4+) keeps
+   > the ship monitor attached; on older CLIs the monitor bails at 5 minutes but the
+   > build continues server-side — poll `telnyx-edge list` until you see `deploy_ok`.
 
 Then exercise the live URL:
 
