@@ -9,7 +9,7 @@ For counters or per-entity coordination use
 
 ## Deploy
 
-1. **Scaffold** a new function in a scratch directory (not this cookbook directory).
+1. **Scaffold** a new function in a scratch directory (not this examples directory).
    `new-func` writes your real `func_id` into the generated `func.toml`:
 
    ```bash
@@ -17,20 +17,20 @@ For counters or per-entity coordination use
    telnyx-edge new-func -l ts -n kv-read-write
    ```
 
-2. **Overwrite the scaffold's source files** with the cookbook versions. Replace
-   `<COOKBOOK>` with the path to your local clone of `edge-compute-cookbook`:
+2. **Overwrite the scaffold's source files** with the versions from this repo. Replace
+   `<EXAMPLES>` with the path to your local clone of `edge-compute-examples`:
 
    ```bash
-   cp <COOKBOOK>/kv-read-write/index.ts \
-      <COOKBOOK>/kv-read-write/package.json \
-      <COOKBOOK>/kv-read-write/tsconfig.json \
+   cp <EXAMPLES>/kv-read-write/index.ts \
+      <EXAMPLES>/kv-read-write/package.json \
+      <EXAMPLES>/kv-read-write/tsconfig.json \
       /tmp/kv-read-write/
    cd /tmp/kv-read-write
    ```
 
    > This replaces the scaffold's placeholder `index.ts`, `package.json`, and
    > `tsconfig.json` — expected. **Do not copy `func.toml`** — the scaffold's has your
-   > real `func_id`; the cookbook's has `func_id = "REPLACE_ME"` and would break the
+   > real `func_id`; this repo's has `func_id = "REPLACE_ME"` and would break the
    > deploy.
 
 3. **Provision the KV namespace** and paste its ID into the scaffolded `func.toml`:
