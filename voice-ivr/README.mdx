@@ -1,0 +1,207 @@
+---
+title: Voice IVR (phone tree)
+---
+
+A full inbound-voice phone tree on Call Control. Your function *is* the Call Control application's
+webhook: Telnyx streams a call's events to it — `call.initiated`, `call.answered`,
+`call.gather.ended`, `call.speak.ended`, `call.recording.saved` — and the function drives the tree
+by reacting to each one through the pre-authenticated `[telnyx]` binding. Callers press **1** to
+reach sales (a live transfer), **2** to hear hours, or **3** to leave a transcribed voicemail.
+
+The full function is in [`index.ts`](index.ts); the binding it declares is in
+[`func.toml`](func.toml).
+
+## The call as a sequence of webhooks
+
+One call is many events to the *same* handler. State that must survive between them rides in
+`client_state` (base64, echoed back on later events) — no database needed for a single call.
+
+```
+ caller dials
+      │
+      ▼
+ call.initiated ──▶ answer
+      │
+      ▼
+ call.answered  ──▶ gatherUsingSpeak(menu, valid_digits "123")
+      │
+      ▼
+ call.gather.ended ─┬─ 1 ─▶ transfer(SALES) ───────────────▶ bridged to a human
+                    ├─ 2 ─▶ speak(hours, state="hangup")
+                    ├─ 3 ─▶ speak(prompt, state="record")
+                    └─ ✗ ─▶ gatherUsingSpeak(menu)  (retry)
+      │
+      ▼
+ call.speak.ended ──┬─ state "hangup" ─▶ hangup
+                    └─ state "record" ─▶ startRecording(beep, transcription)
+      │
+      ▼
+ call.recording.saved ─▶ URL + transcript → fan out → hangup
+```
+
+## Components
+
+| Concern | Product | How |
+|---------|---------|-----|
+| Call events | Telnyx Call Control | A Call Control app POSTs every event to the function URL |
+| Menu + prompts | Call Control actions | `gatherUsingSpeak`, `speak` (Telnyx TTS, no audio files) |
+| Live handoff | Call Control action | `transfer` — Telnyx dials sales and bridges the caller |
+| Voicemail | Call Control action | `startRecording` with `play_beep` + `transcription` |
+| Per-call state | `client_state` | Base64 tag echoed back on `call.speak.ended` |
+
+## Prerequisites
+
+- A [Telnyx account](https://telnyx.com/sign-up) and API key (create one at
+  [portal.telnyx.com/app/api-keys](https://portal.telnyx.com/#/api-keys)).
+- The `telnyx-edge` CLI installed and authenticated.
+- A Telnyx phone number with **voice capability** to route to the function.
+- A Telnyx **Call Control application** — you'll create this after shipping (Wire section below).
+- A phone number to use as your transfer target (press-1 destination). This is what `SALES`
+  will be edited to; it can be any E.164 number Telnyx can dial.
+
+## Deploy
+
+1. **Scaffold a new function** in a scratch directory (not this directory):
+
+   ```bash
+   cd /tmp   # or anywhere outside this repo
+   telnyx-edge new-func -l ts -n voice-ivr
+   ```
+
+   `new-func` writes the assigned `func_id` into the generated `func.toml`. **Do not overwrite
+   this file** — the example's `func.toml` has `func_id = "REPLACE_ME"` and would discard the
+   real ID.
+
+2. **Copy source and package files only** from this example into the scaffolded directory. Replace `<EXAMPLES>` with the path to your local clone of this repo:
+
+   ```bash
+   cp <EXAMPLES>/voice-ivr/index.ts \
+      <EXAMPLES>/voice-ivr/package.json \
+      <EXAMPLES>/voice-ivr/tsconfig.json \
+      /tmp/voice-ivr/
+   cd /tmp/voice-ivr
+   ```
+
+   Then merge the `[telnyx]` binding block from this example's `func.toml` into the generated one (keep the `[edge_compute]` section with your real `func_id` untouched):
+
+   ```toml
+   [telnyx]
+   binding = "MY_TELNYX"
+   ```
+
+3. **Edit the placeholders** at the top of [`index.ts`](index.ts):
+
+   - `SALES` — the E.164 number to transfer callers to on press-1. **The default
+     `+13125550100` is a placeholder; leaving it will attempt to bridge real callers.**
+   - `VOICE` — optional; see [Telnyx TTS voices](https://developers.telnyx.com/docs/voice/tts/providers/telnyx).
+   - `MENU` / `HOURS` — the prompts callers hear.
+
+4. **Generate type bindings:**
+
+   ```bash
+   telnyx-edge types   # writes telnyx-env.d.ts — types env.MY_TELNYX
+   ```
+
+5. **Ship the function:**
+
+   ```bash
+   telnyx-edge ship     # → https://voice-ivr-<func-id-prefix>.telnyxcompute.com
+   ```
+
+6. **Wire the Call Control app** to the function URL (see [Wire event sources](#wire-event-sources) below).
+
+## Wire event sources
+
+Export your Telnyx API key first:
+
+```bash
+export TELNYX_API_KEY=<your-telnyx-api-key>
+```
+
+Create a Call Control application whose webhook URL is the function URL:
+
+```bash
+# Replace <FUNCTION_URL> with your telnyxcompute.com URL from `telnyx-edge ship`.
+curl -X POST "https://api.telnyx.com/v2/call_control_applications" \
+  -H "Authorization: Bearer $TELNYX_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "application_name": "voice-ivr",
+    "webhook_event_url": "<FUNCTION_URL>",
+    "webhook_event_failover_url": "",
+    "webhook_api_version": "2"
+  }'
+```
+
+> **`webhook_api_version` matters.** The default is `"1"`, which sends a legacy
+> envelope where events are underscored (`call_initiated`) and the payload sits at
+> the top level. `index.ts` parses the v2 shape — dot-cased events (`call.initiated`,
+> `call.gather.ended`) under `.data.event_type` — so a v1 app leaves `evt` undefined
+> and the switch statement falls through. The function returns `200` and the call
+> is never answered.
+
+Assign your phone number to the new Call Control application in the
+[Telnyx portal](https://portal.telnyx.com/#/app/numbers/my-numbers) (Numbers → select your
+number → Voice → Connection = your new Call Control application). See
+[Handling calls](https://developers.telnyx.com/docs/edge-compute/telnyx-api/handling-calls)
+for a full `curl`-only walk-through.
+
+## Test
+
+Call the number from any phone and walk the menu. Press **1** to be transferred, **2** to hear
+the hours and get hung up on, **3** to leave a message — the recording URL and transcript are
+logged on `call.recording.saved` (see logs with `telnyx-edge logs`).
+
+## Cleanup
+
+1. **Delete the function** when you're done:
+
+   ```bash
+   telnyx-edge delete-func voice-ivr
+   ```
+
+2. **Deactivate the Call Control application** in the Telnyx portal (or delete it via API), and
+   re-assign or release the phone number so it doesn't keep pointing at a dead webhook.
+
+## Behavioral notes
+
+- **Every branch is event-driven.** There's no blocking "wait for a keypress" — you issue an action (`gatherUsingSpeak`), return `200`, and handle the *result* event (`call.gather.ended`) as a fresh request. `client_state` is how step N tells step N+1 what it was doing.
+- **`speak` uses Telnyx TTS** — no hosted audio files to manage. To play a recorded greeting instead, swap `speak`/`gatherUsingSpeak` for `startPlayback`/`gatherUsingAudio` with a public HTTPS `.mp3`/`.wav` (see [Handling calls](https://developers.telnyx.com/docs/edge-compute/telnyx-api/handling-calls)).
+- **Transfer is fire-and-continue.** After `transfer` Telnyx bridges the legs; if the destination doesn't answer you get a `call.hangup` for that leg while the caller stays up — add a branch to fall back to voicemail.
+- **This tree is stateless per call.** `client_state` carries a single tag, which is plenty here. For a tree that counts invalid attempts, aggregates across calls, or coordinates a queue, reach for [KV](https://developers.telnyx.com/docs/edge-compute/kv) or a [Stateful Actor](https://developers.telnyx.com/docs/edge-compute/stateful-actors) keyed by `call_control_id`.
+- **Ack fast.** The handler returns `200` right after issuing the action; slow work would trip the request timeout and trigger webhook retries.
+
+> **⚠️ Security note:** `index.ts` uses `webhooks.unsafeUnwrap()`, which parses the webhook
+> payload **without** validating the Telnyx Ed25519 signature. This is fine for local development
+> and trusted private networks. For production deployments exposed to the public internet, any HTTP
+> client can POST a crafted payload and drive the IVR state machine (`answer`, `transfer`, `record`,
+> `hangup`) against real calls.
+>
+> Swap this line:
+>
+> ```ts
+> const evt = (env.MY_TELNYX.webhooks.unsafeUnwrap(await readBody(req)) as { data: any }).data;
+> ```
+>
+> for the verifying variant:
+>
+> ```ts
+> const evt = (env.MY_TELNYX.webhooks.unwrap(await readBody(req), {
+>   headers: req.headers as Record<string, string>,
+>   // key: env.SECRETS.get("TELNYX_PUBLIC_KEY"), // optional — SDK reads client.publicKey by default
+> }) as { data: any }).data;
+> ```
+>
+> `unwrap()` verifies the Ed25519 signature via [`standardwebhooks`](https://www.npmjs.com/package/standardwebhooks)
+> and throws if the signature is invalid or the timestamp is outside a 5-minute window. It is
+> synchronous (like `unsafeUnwrap`) — the returned envelope is the parsed JSON, not a Promise, so
+> no `await` is needed on the call itself. The shape (`{ data: <event> }`) is identical, so the
+> rest of the handler doesn't change. `sms-ai-chatbot/index.ts:43` uses `await` in front of
+> `unwrap()` for consistency with the `readBody` async chain — harmless but not required. See the
+> `sms-ai-chatbot` example for a full working reference.
+
+## Use cases
+
+- **Main-line auto-attendant** — route callers before a human picks up
+- **After-hours voicemail** — record + transcribe, drop the transcript into a ticket
+- **Overflow / on-call routing** — press-1 transfer to whoever is on duty
