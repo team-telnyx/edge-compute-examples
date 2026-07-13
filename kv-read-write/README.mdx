@@ -57,12 +57,10 @@ For counters or per-entity coordination use
 5. **Ship the function:**
 
    ```bash
-   telnyx-edge ship --timeout 30m   # → https://kv-read-write-<hash>.telnyxcompute.com
+   telnyx-edge ship    # → https://kv-read-write-<hash>.telnyxcompute.com
    ```
 
-   > TypeScript builds typically take 10–15 minutes. `--timeout 30m` (v0.2.4+) keeps
-   > the ship monitor attached; on older CLIs the monitor bails at 5 minutes but the
-   > build continues server-side — poll `telnyx-edge list` until you see `deploy_ok`.
+   > TypeScript builds typically take 10–15 minutes.
 
 Needs `@telnyx/edge-runtime` **≥ 0.2.2** (earlier silently ignore `expirationTtl`). `rest.sh`
 shows the non-TypeScript REST path.
