@@ -1,0 +1,22 @@
+{
+  "name": "notes-api",
+  "version": "1.0.0",
+  "description": "Telnyx Edge Compute sample: notes-api",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@telnyx/edge-runtime": "^0.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

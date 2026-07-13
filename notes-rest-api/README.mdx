@@ -1,0 +1,120 @@
+---
+title: Build a REST API
+---
+
+A create/read/delete notes API — `POST /notes`, `GET /notes`, `GET /notes/:id`,
+`DELETE /notes/:id` — as a single TypeScript function. Records live in a KV namespace
+bound as `env.NOTES`, so state survives deploys and restarts and is shared by every
+container instance.
+
+> **No `PUT` / `PATCH`.** This example intentionally skips in-place edits because KV writes
+> are last-write-wins. See [What this example does not do](#what-this-example-does-not-do)
+> for why, and what to reach for when you need atomic updates.
+
+## Prerequisites
+
+- `telnyx-edge` CLI **v0.2.3+**, authenticated. Node 18+ for local type-checking.
+- `@telnyx/edge-runtime` **`^0.3.0`** (already pinned in `package.json`).
+
+## Deploy
+
+1. **Scaffold** a new function in a scratch directory (not this cookbook directory).
+   `new-func` writes your real `func_id` into the generated `func.toml`:
+
+   ```bash
+   cd /tmp   # or anywhere outside this repo
+   telnyx-edge new-func -l ts -n notes-api
+   ```
+
+2. **Overwrite the scaffold's source files** with the cookbook versions. Replace
+   `<COOKBOOK>` with the path to your local clone of `edge-compute-cookbook`:
+
+   ```bash
+   cp <COOKBOOK>/notes-rest-api/index.ts \
+      <COOKBOOK>/notes-rest-api/package.json \
+      <COOKBOOK>/notes-rest-api/tsconfig.json \
+      /tmp/notes-api/
+   cd /tmp/notes-api
+   ```
+
+   > This replaces the scaffold's placeholder `index.ts`, `package.json`, and
+   > `tsconfig.json` — expected. **Do not copy `func.toml`** — the scaffold's has your
+   > real `func_id`; the cookbook's has `func_id = "REPLACE_ME"` and would break the
+   > deploy.
+
+3. **Provision the KV namespace** and paste its ID into the scaffolded `func.toml`:
+
+   ```bash
+   telnyx-edge storage kv create --name notes
+   # → copy the returned namespace ID
+   ```
+
+   Then append this block to the scaffold's `func.toml` (replace `<KV_ID>` with the
+   returned ID):
+
+   ```toml
+   [storage.kv.NOTES]
+   id = "<KV_ID>"
+   ```
+
+4. **Install dependencies and generate typed bindings:**
+
+   ```bash
+   npm install         # installs @telnyx/edge-runtime
+   telnyx-edge types   # writes telnyx-env.d.ts so env.NOTES is typed
+   ```
+
+5. **Ship the function:**
+
+   ```bash
+   telnyx-edge ship --timeout 30m   # → https://notes-api-<hash>.telnyxcompute.com
+   ```
+
+   > TypeScript builds typically take 10–15 minutes. `--timeout 30m` (v0.2.4+) keeps
+   > the ship monitor attached; on older CLIs the monitor bails at 5 minutes but the
+   > build continues server-side — poll `telnyx-edge list` until you see `deploy_ok`.
+
+Then exercise the live URL:
+
+```bash
+B=https://notes-api-<org>.telnyxcompute.com
+
+curl -sS -X POST $B/notes \
+  -H 'content-type: application/json' \
+  -d '{"title":"groceries","body":"eggs, coffee"}'
+# → {"id":"2e6e8c82-1b9f-4044-8005-ccdf28aceaf9","title":"groceries","body":"eggs, coffee","updatedAt":"2026-07-07T06:47:12.123Z"}
+
+curl -sS $B/notes
+# → {"notes":[{"id":"…","title":"groceries","body":"eggs, coffee","updatedAt":"…"}]}
+
+curl -sS $B/notes/2e6e8c82-1b9f-4044-8005-ccdf28aceaf9
+# → {"id":"…","title":"groceries","body":"eggs, coffee","updatedAt":"…"}
+
+curl -sS -X DELETE $B/notes/2e6e8c82-1b9f-4044-8005-ccdf28aceaf9
+# → {"deleted":true}
+```
+
+## Verify from the CLI
+
+While debugging, inspect the KV namespace directly:
+
+```bash
+telnyx-edge storage kv key list <kv-id>              # list all keys (note/<uuid>)
+telnyx-edge storage kv key get <kv-id> "note/<uuid>" # read the raw JSON value
+```
+
+## What this example does not do
+
+- **No `PUT` / `PATCH`.** By design — `POST /notes` creates, `DELETE` removes, and updates
+  are omitted because KV writes are **last-write-wins**. If two clients read → merge → write
+  concurrently, one write silently overwrites the other. For atomic updates on a per-record
+  basis, use a
+  [Stateful Actor](https://developers.telnyx.com/docs/edge-compute/stateful-actors) per
+  note (one actor instance = one call at a time = no race). Adding `PUT` here would work,
+  but the constraint is worth knowing before you build on it.
+- **First page only.** `GET /notes` returns up to 1000 notes and no cursor — good enough
+  for a demo. For >1000 keys, extend the handler to accept `?cursor=…` and pass it into
+  `env.NOTES.list({ cursor })`; the runtime returns `list_complete: false` and a
+  `cursor` string when there's more.
+
+KV keys forbid `:` (use `/`), values are ≤ 1 MiB.

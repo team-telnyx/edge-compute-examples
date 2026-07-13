@@ -1,0 +1,6 @@
+[edge_compute]
+func_id = "REPLACE_ME"     # written by `telnyx-edge new-func -l ts -n notes-api`
+func_name = "notes-api"
+
+[storage.kv.NOTES]
+id = "REPLACE_WITH_YOUR_KV_ID"   # from `telnyx-edge storage kv create --name notes`
