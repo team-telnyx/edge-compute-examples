@@ -1,6 +1,6 @@
 # Telnyx Edge Compute — Examples
 
-Runnable, prod-verified recipes for [Telnyx Edge Compute](https://telnyx.com/products/edge-compute).
+Runnable, prod-verified recipes for [Telnyx Edge Compute](https://developers.telnyx.com/docs/edge-compute/platform-overview).
 
 Each folder is a self-contained function you can ship to the platform with the [Telnyx Edge CLI](https://github.com/team-telnyx/edge-compute).
 
