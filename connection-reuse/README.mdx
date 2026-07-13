@@ -43,12 +43,10 @@ as a cache, not a store. For durable data use
 4. **Ship the function:**
 
    ```bash
-   telnyx-edge ship --timeout 30m   # → https://connection-reuse-<hash>.telnyxcompute.com
+   telnyx-edge ship    # → https://connection-reuse-<hash>.telnyxcompute.com
    ```
 
-   > TypeScript builds typically take 10–15 minutes. `--timeout 30m` (v0.2.4+) keeps
-   > the ship monitor attached; on older CLIs the monitor bails at 5 minutes but the
-   > build continues server-side — poll `telnyx-edge list` until you see `deploy_ok`.
+   > TypeScript builds typically take 10–15 minutes.
 
 `npm run typecheck` passes as-is.
 
