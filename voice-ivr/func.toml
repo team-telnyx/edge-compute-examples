@@ -1,0 +1,6 @@
+[edge_compute]
+func_id = "REPLACE_ME"        # written by `telnyx-edge new-func -l ts -n voice-ivr`
+func_name = "voice-ivr"
+
+[telnyx]
+binding = "MY_TELNYX"

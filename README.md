@@ -12,6 +12,7 @@ Each folder is a self-contained function you can ship to the platform with the [
 | [`kv-read-write`](./kv-read-write) | Read, write, and TTL keys with `env.MY_KV` (Telnyx KV storage) |
 | [`connection-reuse`](./connection-reuse) | Module-level state and warm-container reuse across requests |
 | [`notes-rest-api`](./notes-rest-api) | Create / read / delete REST API backed by KV |
+| [`voice-ivr`](./voice-ivr) | Inbound IVR menu with speech, gather, transfer, and voicemail |
 
 ## Getting started
 
