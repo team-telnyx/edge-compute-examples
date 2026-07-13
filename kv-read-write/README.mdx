@@ -7,17 +7,65 @@ chars from `a-z A-Z 0-9 - _ / = .` (colons rejected — use `/`), values ≤ 1 M
 For counters or per-entity coordination use
 [Stateful Actors](https://developers.telnyx.com/docs/edge-compute/stateful-actors) instead.
 
-## Run
+## Deploy
 
-```bash
-telnyx-edge storage kv create --name my-cache      # note the KV ID → paste into func.toml id
-telnyx-edge new-func -l ts -n kv-read-write         # copy index.ts + [storage.kv.MY_KV] over
-telnyx-edge types
-telnyx-edge ship
-```
+1. **Scaffold** a new function in a scratch directory (not this cookbook directory).
+   `new-func` writes your real `func_id` into the generated `func.toml`:
+
+   ```bash
+   cd /tmp   # or anywhere outside this repo
+   telnyx-edge new-func -l ts -n kv-read-write
+   ```
+
+2. **Overwrite the scaffold's source files** with the cookbook versions. Replace
+   `<COOKBOOK>` with the path to your local clone of `edge-compute-cookbook`:
+
+   ```bash
+   cp <COOKBOOK>/kv-read-write/index.ts \
+      <COOKBOOK>/kv-read-write/package.json \
+      <COOKBOOK>/kv-read-write/tsconfig.json \
+      /tmp/kv-read-write/
+   cd /tmp/kv-read-write
+   ```
+
+   > This replaces the scaffold's placeholder `index.ts`, `package.json`, and
+   > `tsconfig.json` — expected. **Do not copy `func.toml`** — the scaffold's has your
+   > real `func_id`; the cookbook's has `func_id = "REPLACE_ME"` and would break the
+   > deploy.
+
+3. **Provision the KV namespace** and paste its ID into the scaffolded `func.toml`:
+
+   ```bash
+   telnyx-edge storage kv create --name my-cache
+   # → copy the returned namespace ID
+   ```
+
+   Then append this block to the scaffold's `func.toml` (replace `<KV_ID>` with the
+   returned ID):
+
+   ```toml
+   [storage.kv.MY_KV]
+   id = "<KV_ID>"
+   ```
+
+4. **Generate typed bindings** — required so `env.MY_KV` type-checks:
+
+   ```bash
+   telnyx-edge types   # writes telnyx-env.d.ts (git-ignored)
+   ```
+
+5. **Ship the function:**
+
+   ```bash
+   telnyx-edge ship --timeout 30m   # → https://kv-read-write-<hash>.telnyxcompute.com
+   ```
+
+   > TypeScript builds typically take 10–15 minutes. `--timeout 30m` (v0.2.4+) keeps
+   > the ship monitor attached; on older CLIs the monitor bails at 5 minutes but the
+   > build continues server-side — poll `telnyx-edge list` until you see `deploy_ok`.
 
 Needs `@telnyx/edge-runtime` **≥ 0.2.2** (earlier silently ignore `expirationTtl`). `rest.sh`
-shows the non-TypeScript REST path. `env.MY_KV` type-checks after `telnyx-edge types`.
+shows the non-TypeScript REST path.
 
 ## Verify from the CLI
 
