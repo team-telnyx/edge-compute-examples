@@ -61,54 +61,23 @@ One call is many events to the *same* handler. State that must survive between t
 
 ## Deploy
 
-1. **Scaffold a new function** in a scratch directory (not this directory):
+```bash
+telnyx-edge new-func -l ts -n voice-ivr          # writes func.toml with your real func_id
+cd voice-ivr
+# copy index.ts, package.json, tsconfig.json over the scaffold's, then
+# merge the [telnyx] binding block from this func.toml into the scaffolded one.
 
-   ```bash
-   cd /tmp   # or anywhere outside this repo
-   telnyx-edge new-func -l ts -n voice-ivr
-   ```
+# Edit placeholders at the top of index.ts BEFORE shipping:
+#   SALES  — E.164 number to transfer callers to on press-1 (default +13125550100 is a placeholder;
+#            leaving it will attempt to bridge real callers)
+#   VOICE  — optional; see Telnyx TTS voices docs
+#   MENU / HOURS — the prompts callers hear
 
-   `new-func` writes the assigned `func_id` into the generated `func.toml`. **Do not overwrite
-   this file** — the example's `func.toml` has `func_id = "REPLACE_ME"` and would discard the
-   real ID.
+telnyx-edge types   # writes telnyx-env.d.ts — types env.MY_TELNYX
+telnyx-edge ship    # → https://voice-ivr-<func-id-prefix>.telnyxcompute.com
+```
 
-2. **Copy source and package files only** from this example into the scaffolded directory. Replace `<EXAMPLES>` with the path to your local clone of this repo:
-
-   ```bash
-   cp <EXAMPLES>/voice-ivr/index.ts \
-      <EXAMPLES>/voice-ivr/package.json \
-      <EXAMPLES>/voice-ivr/tsconfig.json \
-      /tmp/voice-ivr/
-   cd /tmp/voice-ivr
-   ```
-
-   Then merge the `[telnyx]` binding block from this example's `func.toml` into the generated one (keep the `[edge_compute]` section with your real `func_id` untouched):
-
-   ```toml
-   [telnyx]
-   binding = "MY_TELNYX"
-   ```
-
-3. **Edit the placeholders** at the top of [`index.ts`](index.ts):
-
-   - `SALES` — the E.164 number to transfer callers to on press-1. **The default
-     `+13125550100` is a placeholder; leaving it will attempt to bridge real callers.**
-   - `VOICE` — optional; see [Telnyx TTS voices](https://developers.telnyx.com/docs/voice/tts/providers/telnyx).
-   - `MENU` / `HOURS` — the prompts callers hear.
-
-4. **Generate type bindings:**
-
-   ```bash
-   telnyx-edge types   # writes telnyx-env.d.ts — types env.MY_TELNYX
-   ```
-
-5. **Ship the function:**
-
-   ```bash
-   telnyx-edge ship     # → https://voice-ivr-<func-id-prefix>.telnyxcompute.com
-   ```
-
-6. **Wire the Call Control app** to the function URL (see [Wire event sources](#wire-event-sources) below).
+Wire the Call Control app to the function URL (see [Wire event sources](#wire-event-sources) below).
 
 ## Wire event sources
 

@@ -1,0 +1,115 @@
+---
+title: SMS OTP Verification
+---
+
+A one-time-passcode (2FA) microservice: `POST /send` mints a 6-digit code, stores it in KV with a
+5-minute TTL, and texts it through the pre-authenticated `[telnyx]` binding; `POST /verify` checks
+the guess, consumes the code on success, and locks out after too many wrong tries. It's a service
+*your own apps* call — authenticated with a bearer secret — and it runs at the edge, so the round
+trip is fast wherever the user is.
+
+The full function is in [`index.ts`](index.ts); the bindings it declares are in
+[`func.toml`](func.toml).
+
+## Architecture
+
+```
+  your backend                Edge Compute Function              ┌────────────┐
+ ┌────────────┐  POST /send   ┌───────────────────────────┐      │  KV: OTP   │
+ │  app / API │ ────────────▶ │ auth (Bearer APP_API_KEY) │      │ otp/<num>  │ code+attempts (TTL)
+ │            │               │ mint code → KV → SMS      │ ───▶ │ cool/<num> │ cooldown (TTL)
+ │            │  POST /verify │ check → consume / lock    │      └────────────┘
+ └────────────┘ ◀──────────── └───────────────────────────┘
+       ▲                                   │ messages.send
+       │   verified: true                  ▼
+       │                            ┌──────────────┐   SMS: "Your code is 123456"
+       └────────────────────────────│ user's phone │◀──────────────────────────
+                                    └──────────────┘
+```
+
+## Components
+
+| Concern | Product | How |
+|---------|---------|-----|
+| Caller auth | Secrets | `env.SECRETS.get("APP_API_KEY")` vs the `Authorization: Bearer` header |
+| Code delivery | Telnyx Messaging | `env.MY_TELNYX.messages.send(...)` — no messaging key in your code |
+| Code storage | KV | `otp/<digits>` `{code, attempts, expiresAt}` with a 5-min TTL |
+| Send throttle | KV | `cool/<digits>` short-TTL flag → one send per `COOLDOWN` seconds |
+| Safe compare | `node:crypto` | `randomInt` to mint, `timingSafeEqual` to check |
+
+## Prerequisites
+
+- A Telnyx account and the CLI authenticated (`telnyx-edge auth`).
+- A **Telnyx phone number you own with SMS enabled** — you'll paste it into the `FROM`
+  constant in `index.ts`. The placeholder `+13125550100` is not a real sender.
+- **For US A2P messaging: an active 10DLC campaign registered on the sending number.**
+  Without this, the API accepts the send (`status: sent`) but US carriers silently drop the
+  SMS — it will never arrive. Register at [Portal → Messaging → 10DLC](https://portal.telnyx.com/#/app/messaging/10dlc).
+  Non-US destinations don't require this.
+- ~30 seconds to generate a random bearer key (`openssl rand -hex 32` below).
+
+## Deploy
+
+```bash
+telnyx-edge new-func -l ts -n sms-otp-verification    # writes func.toml with your real func_id
+cd sms-otp-verification
+# copy index.ts, package.json, tsconfig.json over the scaffold's, then
+# merge the [telnyx], [storage.kv.OTP], and [[secrets]] blocks from this func.toml
+# into the scaffolded one.
+
+telnyx-edge storage kv create --name otp               # paste the returned KV ID into func.toml
+telnyx-edge secrets add APP_API_KEY "$(openssl rand -hex 32)"
+
+telnyx-edge types   # writes telnyx-env.d.ts (git-ignored)
+telnyx-edge ship    # → https://sms-otp-verification-<hash>.telnyxcompute.com
+```
+
+Before `ship`, set `FROM` at the top of [`index.ts`](index.ts) to your Telnyx sender
+number — otherwise every `/send` returns 500.
+
+> **Build note:** TypeScript recipes currently take ~15 minutes to build on the platform.
+
+## Try it
+
+Copy the function URL printed by `telnyx-edge ship` into `BASE` (the hash suffix depends
+on your org, not your `func_id`):
+
+```bash
+BASE=<paste function URL from `telnyx-edge ship`>
+KEY=<the APP_API_KEY you set>
+PHONE=<your phone number to receive the test SMS>
+
+# 1. send a code
+curl -X POST "$BASE/send" \
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d "{\"phone_number\":\"$PHONE\"}"
+# → {"status":"sent","expires_in":300}
+
+# 2. verify the code the user received
+curl -X POST "$BASE/verify" \
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d "{\"phone_number\":\"$PHONE\",\"code\":\"123456\"}"
+# → {"verified":true}   (or {"verified":false,"attempts_left":4})
+```
+
+## Behavioral notes
+
+- **The code's lifetime is anchored, not extendable.** Each challenge stores an absolute `expiresAt`; a wrong guess re-writes the record with the *remaining* TTL, so guessing can't keep a code alive past its 5-minute window. `verify` treats a past `expiresAt` as expired even if KV hasn't evicted it yet.
+- **Single-use and rate-limited.** A correct code is deleted immediately; `MAX_ATTEMPTS` wrong guesses burn it; the `cool/<num>` key caps sends to one per `COOLDOWN` seconds so the endpoint can't be used to spam SMS (which also costs you money).
+- **Constant-time compare.** Codes are checked with `timingSafeEqual`, not `===`, so response time doesn't leak how much of the code was right.
+- **KV is eventually consistent.** Reads can briefly lag a write across regions — fine for OTP (a just-sent code verifies within the same region), but don't build balance-style "read-modify-write must be exact" logic on it. The attempt counter here tolerates a rare lost increment; if you can't, use a [Stateful Actor](https://developers.telnyx.com/docs/edge-compute/stateful-actors) keyed by phone number.
+- **Prefer Telnyx Verify for production.** Telnyx has a managed [Verify API](https://developers.telnyx.com/docs/messaging/verify) that handles code generation, delivery, retries, and fraud controls for you. This recipe rolls its own to show the KV-TTL + Secrets + Messaging pattern end to end.
+
+## Use cases
+
+- **Login / signup 2FA** — a low-latency verify endpoint close to every user
+- **Step-up auth** — confirm a phone before a sensitive action
+- **Passwordless SMS login** — send a code, verify, mint a session upstream
+
+## Cleanup
+
+```bash
+telnyx-edge delete-func sms-otp-verification
+telnyx-edge storage kv delete <KV_ID>          # id from `telnyx-edge storage kv list`
+telnyx-edge secrets delete APP_API_KEY
+```

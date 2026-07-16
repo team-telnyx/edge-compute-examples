@@ -14,6 +14,7 @@ Each folder is a self-contained function you can ship to the platform with the [
 | [`notes-rest-api`](./notes-rest-api) | Create / read / delete REST API backed by KV |
 | [`voice-ivr`](./voice-ivr) | Inbound IVR menu with speech, gather, transfer, and voicemail |
 | [`iot-data-ingestion`](./iot-data-ingestion) | IoT sensor readings → KV snapshot + Cloud Storage archive |
+| [`sms-otp-verification`](./sms-otp-verification) | One-time passcode (2FA) microservice: KV-TTL + Secrets + Messaging |
 
 ## Getting started
 
