@@ -1,0 +1,151 @@
+---
+title: IoT Data Ingestion
+---
+
+An HTTPS endpoint devices POST readings to. The function authenticates the device, validates and
+enriches the reading, keeps a small per-device snapshot in
+[KV](https://developers.telnyx.com/docs/edge-compute/kv), and archives every reading durably in
+[Telnyx Cloud Storage](https://developers.telnyx.com/docs/cloud-storage) via the `env.ARCHIVE`
+binding — both sinks are Telnyx, no external data lake and no S3 keys in your code. The function
+itself holds no data — containers scale out and recycle, so anything not written to KV or Cloud
+Storage is gone.
+
+The full function is in [`index.ts`](index.ts); the bindings it declares are in
+[`func.toml`](func.toml).
+
+## Prerequisites
+
+- `telnyx-edge` CLI **v0.2.4+**, authenticated.
+- `@telnyx/edge-runtime` **`^0.5.0`** (already pinned in `package.json`) — 0.5.0 is the first
+  release with Cloud Storage types.
+- An S3-compatible client for creating the archive bucket (`aws` CLI, `s3cmd`, etc.) — the
+  `telnyx-edge` CLI does not yet expose bucket creation.
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                       IoT Devices (Global)                        │
+│  ┌───────┐  ┌───────┐  ┌───────┐  ┌───────┐  ┌───────┐          │
+│  │Sensor │  │Sensor │  │Sensor │  │Sensor │  │Sensor │          │
+│  │  A    │  │  B    │  │  C    │  │  D    │  │  E    │          │
+│  └───┬───┘  └───┬───┘  └───┬───┘  └───┬───┘  └───┬───┘          │
+└──────┼──────────┼──────────┼──────────┼──────────┼───────────────┘
+       └──────────┴────┬─────┴──────────┴──────────┘
+                       ▼  HTTPS POST
+         ┌──────────────────────────────────┐
+         │      Edge Compute Function       │
+         │  ┌──────────┐    ┌────────────┐  │
+         │  │ Validate │ →  │  Enrich +  │  │
+         │  │  + Auth  │    │  Archive   │  │
+         │  └──────────┘    └────────────┘  │
+         └──────────────────────────────────┘
+                │                    │
+                ▼                    ▼
+      ┌──────────────────┐  ┌────────────────────────┐
+      │  KV: last-seen   │  │ Telnyx Cloud Storage   │
+      │  per device      │  │ readings/<dev>/<day>/… │
+      └──────────────────┘  └────────────────────────┘
+```
+
+## Components
+
+| Concern | Product | How |
+|---------|---------|-----|
+| Ingestion endpoint | Edge Compute function | `node:http` server on the function URL |
+| Device auth | Secrets | `env.SECRETS.get("DEVICE_TOKEN")`; secrets are also injected as plain environment variables |
+| Last-seen snapshot | KV | `env.DEVICES.put` with `expirationTtl` — a device that goes quiet ages out by itself |
+| Durable archive | Telnyx Cloud Storage | `env.ARCHIVE.put(key, body)` — one object per reading, partitioned by device + day; no S3 keys in your code |
+
+## Deploy
+
+```bash
+telnyx-edge new-func -l ts -n iot-ingest            # writes func.toml with your real func_id
+# copy index.ts over the scaffold's, then merge [storage.kv.DEVICES]
+# and [storage.cloudstorage.ARCHIVE] from this func.toml.
+
+telnyx-edge storage kv create --name devices        # paste the KV ID into func.toml [storage.kv.DEVICES].id
+
+# Create the archive bucket via the S3-compatible endpoint.
+# Bucket names are in a GLOBAL namespace across all Telnyx accounts — suffix with something unique.
+# The Telnyx API key acts as BOTH the AWS access key and secret key (S3-style HMAC auth over the Telnyx endpoint).
+export AWS_ACCESS_KEY_ID="$TELNYX_API_KEY"
+export AWS_SECRET_ACCESS_KEY="$TELNYX_API_KEY"
+aws --endpoint-url https://us-central-1.telnyxcloudstorage.com --region us-central-1 \
+    s3api create-bucket --bucket iot-readings-<your-suffix>
+# then set bucket_name + region in [storage.cloudstorage.ARCHIVE] in func.toml
+
+telnyx-edge secrets add DEVICE_TOKEN "<shared device token>"
+
+telnyx-edge types    # types env.DEVICES (KV) + env.ARCHIVE (CloudStorageBucket) + env.SECRETS
+
+telnyx-edge ship     # prints your function URL, e.g. https://iot-ingest-<hash>.telnyxcompute.com
+```
+
+## Smoke test
+
+Copy the function URL printed by `telnyx-edge ship` into `B` (the actual hash suffix
+depends on your org, not your `func_id`):
+
+```bash
+B=<paste function URL from `telnyx-edge ship`>
+TOKEN="<same value you passed to secrets add>"
+
+# health (empty body, exit code 0 = 200 OK)
+curl -sS -o /dev/null -w "%{http_code}\n" $B/health
+# → 200
+
+# no auth → 401
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST $B/ \
+  -H 'content-type: application/json' \
+  -d '{"sensor_type":"temperature","value":42,"timestamp":"2026-07-07T06:47:12Z"}'
+# → 401
+
+# valid reading → 202
+# The response's `archived` path is built from `received_at` (server-generated at handle time),
+# not from the submitted `timestamp`, so the ISO string in your response will be "now" — not
+# 2026-07-07T06:47:12Z. Only the sensor-abc-01/YYYY-MM-DD prefix is predictable.
+curl -sS -X POST $B/ \
+  -H "authorization: Bearer $TOKEN" \
+  -H "content-type: application/json" \
+  -H "x-device-id: sensor-abc-01" \
+  -d '{"sensor_type":"temperature","value":42,"timestamp":"2026-07-07T06:47:12Z"}'
+# → {"received":true,"archived":"readings/sensor-abc-01/<today>/<server-iso-now>.json"}
+
+# invalid body → 400
+curl -sS -X POST $B/ \
+  -H "authorization: Bearer $TOKEN" \
+  -H "content-type: application/json" \
+  -d 'nope'
+# → 400 {"error":"invalid reading"}
+```
+
+Verify KV snapshot + Cloud Storage archive:
+
+```bash
+# KV snapshot
+telnyx-edge storage kv key get <kv-id> "last/sensor-abc-01"
+
+# Cloud Storage archive (S3-compatible) — uses the same AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY exported above.
+aws --endpoint-url https://us-central-1.telnyxcloudstorage.com --region us-central-1 \
+    s3 ls s3://<bucket>/readings/sensor-abc-01/
+```
+
+A fleet dashboard would enumerate devices with `env.DEVICES.list({ prefix: "last/" })` — entries
+carry key names plus `sizeBytes` and `updatedAt` (not values), so "which devices reported recently"
+is a single list call; `get` fetches an individual snapshot. This example does not currently
+expose that as an HTTP route — add one if you need it.
+
+## Behavioral notes
+
+- **Don't buffer in memory.** Containers scale out and recycle; an in-memory batch is lost on either. Write each reading to Cloud Storage synchronously (as above) — and return an error status when the archive write fails so the device retries.
+- **There is no cron.** HTTP is the only trigger. For rollups or periodic aggregation, run an external scheduler — e.g. a GitHub Actions cron — that hits a `/rollup` endpoint on the function.
+- **KV is a snapshot store here, not a counter.** `put` overwrites; concurrent read-modify-write races. For exact per-device counters, deduplication, or ordering, use a [Stateful Actor](https://developers.telnyx.com/docs/edge-compute/stateful-actors) keyed by device ID.
+- **Size limits bite at both ends.** KV values are capped at 1 MiB, and the Cloud Storage write plus the KV write must finish within the request timeout (see [Limits](https://developers.telnyx.com/docs/edge-compute/platform/limits)).
+- **Cloud Storage keys allow colons.** ISO 8601 timestamps in object keys (e.g. `2026-07-07T06:47:12Z.json`) work fine in Cloud Storage but would **not** work in KV, whose key charset is `[a-zA-Z0-9-_/=.]`.
+
+## Use cases
+
+- **Fleet telemetry** — vehicles POST position and status; Cloud Storage keeps the full history, KV answers "where is it now"
+- **Smart buildings** — sensors report on interval; TTL'd snapshots make silent sensors visible
+- **Industrial monitoring** — validate and normalize at the edge before data reaches central systems
