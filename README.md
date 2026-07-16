@@ -13,6 +13,7 @@ Each folder is a self-contained function you can ship to the platform with the [
 | [`connection-reuse`](./connection-reuse) | Module-level state and warm-container reuse across requests |
 | [`notes-rest-api`](./notes-rest-api) | Create / read / delete REST API backed by KV |
 | [`voice-ivr`](./voice-ivr) | Inbound IVR menu with speech, gather, transfer, and voicemail |
+| [`iot-data-ingestion`](./iot-data-ingestion) | IoT sensor readings → KV snapshot + Cloud Storage archive |
 
 ## Getting started
 

@@ -1,0 +1,18 @@
+[edge_compute]
+func_id = "REPLACE_ME"        # written by `telnyx-edge new-func -l ts -n iot-ingest`
+func_name = "iot-ingest"
+
+# telnyx-edge storage kv create --name devices  → paste the namespace ID
+[storage.kv.DEVICES]
+id = "REPLACE_ME"
+
+# telnyx-edge secrets add DEVICE_TOKEN "<shared device token>"
+[[secrets]]
+binding = "DEVICE_TOKEN"
+name    = "DEVICE_TOKEN"
+
+# Durable archive → Telnyx Cloud Storage, reached as env.ARCHIVE.put/get/list.
+# Create a bucket first (Portal or the Cloud Storage API); no S3 keys in your code.
+[storage.cloudstorage.ARCHIVE]
+bucket_name = "iot-readings"
+region      = "us-central-1"
