@@ -10,43 +10,15 @@ as a cache, not a store. For durable data use
 
 ## Deploy
 
-1. **Scaffold** a new function in a scratch directory (not this examples directory).
-   `new-func` writes your real `func_id` into the generated `func.toml`:
+```bash
+telnyx-edge new-func -l ts -n connection-reuse   # writes func.toml with your real func_id
+cd connection-reuse
+# copy index.ts, package.json, tsconfig.json over the scaffold's, then
+# merge the [telnyx] binding block from this func.toml into the scaffolded one.
 
-   ```bash
-   cd /tmp   # or anywhere outside this repo
-   telnyx-edge new-func -l ts -n connection-reuse
-   ```
-
-2. **Overwrite the scaffold's source files** with the versions from this repo. Replace
-   `<EXAMPLES>` with the path to your local clone of `edge-compute-examples`:
-
-   ```bash
-   cp <EXAMPLES>/connection-reuse/index.ts \
-      <EXAMPLES>/connection-reuse/package.json \
-      <EXAMPLES>/connection-reuse/tsconfig.json \
-      /tmp/connection-reuse/
-   cd /tmp/connection-reuse
-   ```
-
-   > This replaces the scaffold's placeholder `index.ts`, `package.json`, and
-   > `tsconfig.json` — expected. **Do not copy `func.toml`** — the scaffold's has your
-   > real `func_id`; this repo's has `func_id = "REPLACE_ME"` and would break the
-   > deploy.
-
-3. **Install dependencies** (pure `node:http`, no bindings to declare):
-
-   ```bash
-   npm install
-   ```
-
-4. **Ship the function:**
-
-   ```bash
-   telnyx-edge ship    # → https://connection-reuse-<hash>.telnyxcompute.com
-   ```
-
-   > TypeScript builds typically take 10–15 minutes.
+npm install
+telnyx-edge ship    # → https://connection-reuse-<hash>.telnyxcompute.com
+```
 
 `npm run typecheck` passes as-is.
 

@@ -18,59 +18,17 @@ container instance.
 
 ## Deploy
 
-1. **Scaffold** a new function in a scratch directory (not this examples directory).
-   `new-func` writes your real `func_id` into the generated `func.toml`:
+```bash
+telnyx-edge new-func -l ts -n notes-api          # writes func.toml with your real func_id
+cd notes-api
+# copy index.ts, package.json, tsconfig.json over the scaffold's, then
+# merge the [storage.kv.NOTES] block from this func.toml into the scaffolded one.
 
-   ```bash
-   cd /tmp   # or anywhere outside this repo
-   telnyx-edge new-func -l ts -n notes-api
-   ```
-
-2. **Overwrite the scaffold's source files** with the versions from this repo. Replace
-   `<EXAMPLES>` with the path to your local clone of `edge-compute-examples`:
-
-   ```bash
-   cp <EXAMPLES>/notes-rest-api/index.ts \
-      <EXAMPLES>/notes-rest-api/package.json \
-      <EXAMPLES>/notes-rest-api/tsconfig.json \
-      /tmp/notes-api/
-   cd /tmp/notes-api
-   ```
-
-   > This replaces the scaffold's placeholder `index.ts`, `package.json`, and
-   > `tsconfig.json` — expected. **Do not copy `func.toml`** — the scaffold's has your
-   > real `func_id`; this repo's has `func_id = "REPLACE_ME"` and would break the
-   > deploy.
-
-3. **Provision the KV namespace** and paste its ID into the scaffolded `func.toml`:
-
-   ```bash
-   telnyx-edge storage kv create --name notes
-   # → copy the returned namespace ID
-   ```
-
-   Then append this block to the scaffold's `func.toml` (replace `<KV_ID>` with the
-   returned ID):
-
-   ```toml
-   [storage.kv.NOTES]
-   id = "<KV_ID>"
-   ```
-
-4. **Install dependencies and generate typed bindings:**
-
-   ```bash
-   npm install         # installs @telnyx/edge-runtime
-   telnyx-edge types   # writes telnyx-env.d.ts so env.NOTES is typed
-   ```
-
-5. **Ship the function:**
-
-   ```bash
-   telnyx-edge ship    # → https://notes-api-<hash>.telnyxcompute.com
-   ```
-
-   > TypeScript builds typically take 10–15 minutes.
+telnyx-edge storage kv create --name notes       # paste the returned KV ID into func.toml
+npm install         # installs @telnyx/edge-runtime
+telnyx-edge types   # writes telnyx-env.d.ts so env.NOTES is typed
+telnyx-edge ship    # → https://notes-api-<hash>.telnyxcompute.com
+```
 
 Then exercise the live URL:
 

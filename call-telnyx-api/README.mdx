@@ -17,25 +17,25 @@ Before running this example you need:
 
 Replace the placeholder `from` and `to` values in `index.ts` before shipping.
 
-## Run
+## Deploy
 
 ```bash
-telnyx-edge new-func -l ts -n call-telnyx-api
+telnyx-edge new-func -l ts -n call-telnyx-api    # writes func.toml with your real func_id
+cd call-telnyx-api
+# copy index.ts, package.json, tsconfig.json over the scaffold's, then
+# merge the [telnyx] binding block from this func.toml into the scaffolded one.
+
+npm install         # installs @telnyx/edge-runtime + @types/node
+telnyx-edge types   # writes telnyx-env.d.ts so env.MY_TELNYX is typed
+telnyx-edge ship    # → https://call-telnyx-api-<hash>.telnyxcompute.com
 ```
 
-Then copy this example's `index.ts` into the generated directory, and **add the following block to the generated `func.toml`** (it is not created automatically):
+The `[telnyx]` binding makes a pre-authenticated Telnyx SDK client available at
+`env.MY_TELNYX` — no API key handling required. Append to the scaffolded `func.toml`:
 
 ```toml
 [telnyx]
 binding = "MY_TELNYX"
-```
-
-This binding makes a pre-authenticated Telnyx SDK client available at `env.MY_TELNYX` in your code — no API key handling required.
-
-```bash
-npm install                # installs @telnyx/edge-runtime + @types/node
-telnyx-edge types          # generates telnyx-env.d.ts so env.MY_TELNYX is typed
-telnyx-edge ship
 ```
 
 ## Verify the send actually delivered

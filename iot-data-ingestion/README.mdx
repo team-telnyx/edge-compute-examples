@@ -61,6 +61,7 @@ The full function is in [`index.ts`](index.ts); the bindings it declares are in
 
 ```bash
 telnyx-edge new-func -l ts -n iot-ingest            # writes func.toml with your real func_id
+cd iot-ingest
 # copy index.ts over the scaffold's, then merge [storage.kv.DEVICES]
 # and [storage.cloudstorage.ARCHIVE] from this func.toml.
 

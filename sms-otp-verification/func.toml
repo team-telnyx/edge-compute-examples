@@ -1,0 +1,15 @@
+[edge_compute]
+func_id = "REPLACE_ME"        # written by `telnyx-edge new-func -l ts -n sms-otp-verification`
+func_name = "sms-otp-verification"
+
+[telnyx]
+binding = "MY_TELNYX"
+
+# telnyx-edge storage kv create --name otp  → paste the namespace ID
+[storage.kv.OTP]
+id = "REPLACE_ME"
+
+# telnyx-edge secrets add APP_API_KEY "<a long random string your apps send>"
+[[secrets]]
+binding = "APP_API_KEY"
+name    = "APP_API_KEY"
