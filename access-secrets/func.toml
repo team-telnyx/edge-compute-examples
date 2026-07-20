@@ -1,0 +1,7 @@
+[edge_compute]
+func_id = "REPLACE_ME"       # written by `telnyx-edge new-func -l ts -n access-secrets`
+func_name = "access-secrets"
+
+[[secrets]]
+binding = "STRIPE_KEY"       # the handle you pass to env.SECRETS.get()
+name    = "STRIPE_KEY"       # the secret's name from `secrets add`
