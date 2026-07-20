@@ -1,0 +1,80 @@
+---
+title: Access secrets
+---
+
+Secrets have two access surfaces: a plain environment variable (injected into every
+function, no declaration) and a typed binding you declare in `func.toml`.
+
+## Deploy
+
+```bash
+telnyx-edge secrets add STRIPE_KEY "sk_live_..."   # store once, org-wide
+telnyx-edge new-func -l ts -n access-secrets      # writes func.toml with your real func_id
+cd access-secrets
+# copy index.ts, package.json, tsconfig.json over the scaffold's, then
+# merge the [[secrets]] block from this func.toml into the scaffolded one.
+
+npm install        # installs @telnyx/edge-runtime
+telnyx-edge types  # generates telnyx-env.d.ts from func.toml
+telnyx-edge ship
+```
+
+The `[[secrets]]` block maps a stored secret to a typed binding on `env`:
+
+```toml
+[[secrets]]
+binding = "SECRETS"
+name    = "STRIPE_KEY"
+```
+
+`binding = "SECRETS"` is the property on `env` used at runtime (`env.SECRETS.get(...)`).
+`name = "STRIPE_KEY"` is the stored secret it points at. Both fields are required —
+without `binding`, `telnyx-edge types` fails with `Missing 'binding' in [[secrets]] block`.
+
+What the setup steps do:
+
+- **`npm install`** — installs `@telnyx/edge-runtime`, which exports the `env` object
+  you import as `import { env } from '@telnyx/edge-runtime'`.
+- **`telnyx-edge types`** — reads `func.toml` and writes `telnyx-env.d.ts`, a local
+  declaration file that adds `env.SECRETS` (and any other bindings you declare) to
+  the runtime's `Env` type so TypeScript stops complaining.
+- **`telnyx-env.d.ts` is git-ignored.** It's a build artifact regenerated from
+  `func.toml`. Re-run `telnyx-edge types` any time you change `func.toml`.
+
+## Which surface should I use?
+
+| Surface | Best for | Language support |
+|---|---|---|
+| `env.SECRETS.get()` | TypeScript/JS with autocomplete, catching typos at build time via `telnyx-edge types` | TS/JS only |
+| `process.env.NAME` | Any language, quick access, no `func.toml` changes needed | Universal |
+
+Both read the same secret store. Use the typed surface when the extra type-safety is worth declaring the binding.
+
+## Test
+
+Once deployed, hit the function URL with `curl`:
+
+```bash
+curl "https://access-secrets-<func-id>.telnyxcompute.com"
+```
+
+You should get back:
+
+```json
+{"typedSurface":true,"envVarSurface":true,"valuesMatch":true}
+```
+
+- `typedSurface` — `env.SECRETS.get()` found the secret via the declared binding
+- `envVarSurface` — `process.env.STRIPE_KEY` found the same secret via the env-var surface
+- `valuesMatch` — both surfaces return the same value, proving they read the same store
+
+If any field is `false`, check that the `[[secrets]]` block in `func.toml` matches the
+secret name from `telnyx-edge secrets add`, and that the function finished deploying
+before you called it.
+
+## Cleanup
+
+```bash
+telnyx-edge delete-func access-secrets
+telnyx-edge secrets delete STRIPE_KEY
+```
