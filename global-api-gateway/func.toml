@@ -1,0 +1,12 @@
+[edge_compute]
+func_id = "REPLACE_ME"        # written by `telnyx-edge new-func -l ts -n api-gateway`
+func_name = "api-gateway"
+
+# telnyx-edge storage kv create --name gateway-kv  → paste the namespace ID
+[storage.kv.GATEWAY_KV]
+id = "REPLACE_ME"
+
+# telnyx-edge secrets add GATEWAY_KEY "<random token>"
+[[secrets]]
+binding = "GATEWAY_KEY"
+name    = "GATEWAY_KEY"

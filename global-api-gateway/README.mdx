@@ -1,0 +1,124 @@
+---
+title: Global API Gateway
+---
+
+One function in front of your **Telnyx Edge Compute functions** (and the Telnyx API): it
+authenticates the caller, applies a rate limit, serves cached responses, and forwards
+everything else on-net to the right function. The whole gateway is built on Telnyx
+primitives — auth keys in [Secrets](https://developers.telnyx.com/docs/edge-compute/configuration/secrets),
+rate-limit counters and the response cache in [KV](https://developers.telnyx.com/docs/edge-compute/kv)
+(so every container sees the same values) — no external Redis, no third-party API gateway.
+
+The full function is in [`index.ts`](index.ts); the bindings it declares are in
+[`func.toml`](func.toml).
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Client Requests                              │
+└─────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                     Edge Compute Function                            │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐ │
+│  │    Auth     │→ │Rate Limiter │→ │    Cache    │→ │   Router    │ │
+│  │  (Secrets)  │  │    (KV)     │  │    (KV)     │  │  (fetch)    │ │
+│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘ │
+└─────────────────────────────────────────────────────────────────────┘
+                                  │
+                    ┌─────────────┼─────────────┐
+                    ▼             ▼             ▼
+              ┌──────────┐  ┌──────────┐  ┌──────────┐
+              │ Service  │  │ Service  │  │ Service  │
+              │    A     │  │    B     │  │    C     │
+              └──────────┘  └──────────┘  └──────────┘
+```
+
+## Components
+
+| Concern | Product | How |
+|---------|---------|-----|
+| Request handling, routing | Edge Compute function | `node:http` server; path-prefix route table; `fetch()` upstream |
+| Response cache | KV | `put(key, body, { expirationTtl: 300 })` — server-side expiry, no cleanup code |
+| Rate limiting | KV | Fixed-window counters keyed by caller and minute |
+| Credentials | Secrets | `env.SECRETS.get("GATEWAY_KEY")` |
+
+## Deploy
+
+```bash
+telnyx-edge new-func -l ts -n api-gateway          # scaffold generates func.toml with a real func_id
+cd api-gateway
+telnyx-edge storage kv create --name gateway-kv     # paste the KV ID into func.toml
+telnyx-edge secrets add GATEWAY_KEY "<random token>"
+telnyx-edge types    # writes telnyx-env.d.ts — types env.GATEWAY_KV and env.SECRETS
+telnyx-edge ship     # → https://api-gateway-<org>.telnyxcompute.com
+```
+
+> **Keep the generated `func.toml`.** `new-func` writes a `func.toml` with your real
+> `func_id` and `func_name` — don't overwrite it with the one in this example (it ships
+> with `func_id = "REPLACE_ME"`). Only copy `index.ts` and the `[storage.kv.GATEWAY_KV]` +
+> `[[secrets]]` blocks from this example's `func.toml` into your generated one.
+
+> **Replace `ROUTES` in `index.ts` before shipping.** The example's `ROUTES` table points
+> at placeholder `*.telnyxcompute.com` URLs that don't resolve. Change them to backend
+> URLs you control (your own APIs, or other Edge Compute functions you've deployed).
+> The gateway forwards `ROUTES[prefix] + path`, so pick backends whose base URL plus
+> the incoming path (e.g. `/api/users`) resolves to a real handler.
+
+> **Shipping takes 10–15 minutes for a first TypeScript deploy** (cold `npm install` + `tsc`).
+> The CLI monitor exits at ~5 minutes with a timeout warning — this is a CLI quirk, not a
+> failure. Check real status with `telnyx-edge list`; wait for `deploy_ok` before testing.
+
+> **If `telnyx-edge storage kv create` returns a timeout**, run `telnyx-edge storage kv list`
+> before retrying — the namespace may have been created successfully server-side. Retrying
+> a successful create returns HTTP 409.
+
+## Try it
+
+Once `telnyx-edge list` shows `deploy_ok`:
+
+```bash
+GATEWAY=https://api-gateway-<your-suffix>.telnyxcompute.com
+TOKEN="<the same token you passed to secrets add>"
+
+# 401 without auth
+curl -sSi $GATEWAY/api/users
+
+# 200 with auth (routes to your first ROUTES entry)
+curl -sSi -H "Authorization: Bearer $TOKEN" $GATEWAY/api/users
+
+# Cache hit — repeat the same GET; second response has x-cache: hit
+curl -sSi -H "Authorization: Bearer $TOKEN" $GATEWAY/api/users
+curl -sSi -H "Authorization: Bearer $TOKEN" $GATEWAY/api/users | grep -i x-cache
+
+# 404 for an unmapped path
+curl -sSi -H "Authorization: Bearer $TOKEN" $GATEWAY/api/nope
+```
+
+## Cleanup
+
+```bash
+telnyx-edge secrets delete GATEWAY_KEY
+telnyx-edge delete-func api-gateway
+telnyx-edge storage kv delete <kv-id>
+```
+
+> `telnyx-edge secrets add` normalizes names to uppercase — e.g. `gateway_key` is
+> stored as `GATEWAY_KEY`. If you're unsure of the stored name, run
+> `telnyx-edge secrets list` first.
+
+## Behavioral notes
+
+- **Counters are approximate.** The KV read-modify-write races under concurrency. If a limit must be exact — billing quotas, one-shot tokens — put the counter in a [Stateful Actor](https://developers.telnyx.com/docs/edge-compute/stateful-actors): one instance per caller, one call at a time, no race.
+- **KV keys** allow `a-zA-Z0-9-_/=.` only — no colons. That's why the keys use `/` separators and a numeric minute window.
+- **KV values are capped at 1 MiB** (writes over that return `413`) — don't cache large bodies, and skip caching rather than fail the request.
+- **Upstream latency spends your request budget.** The function must respond within the request timeout (see [Limits](https://developers.telnyx.com/docs/edge-compute/platform/limits)); a slow backend plus retries can exceed it.
+- **A newly created KV namespace is `pending` for ~3–20 s** — writes return `409` until it activates. Create the namespace before first deploy, not lazily at request time.
+
+## Use cases
+
+- **Microservices gateway** — one entry point, one place for auth and limits
+- **Third-party API proxy** — add caching and rate limiting in front of a metered upstream
+- **Backend-for-frontend** — shape and cache responses per client near the user

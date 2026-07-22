@@ -1,0 +1,4 @@
+node_modules/
+dist/
+telnyx-env.d.ts
+package-lock.json
